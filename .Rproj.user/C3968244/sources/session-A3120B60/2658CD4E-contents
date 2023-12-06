@@ -1,0 +1,10 @@
+---
+title: "Untitled"
+author: "Yuxin Liu yl3564"
+date: "2023-12-05"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```

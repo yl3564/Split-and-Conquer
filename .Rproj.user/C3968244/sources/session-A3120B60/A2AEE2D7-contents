@@ -1,0 +1,298 @@
+---
+title: "SC Function"
+author: "Yuxin Liu yl3564"
+date: "2023-12-01"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+n<-800
+p<-2*n
+
+# generate iid x
+mu<-matrix(0,nrow=p,ncol=1)
+sigma<-diag(1,nrow=p)
+iid<-mvrnorm(n,mu,sigma)
+
+# generate non-iid x
+mu<-matrix(0,nrow=p,ncol=1)
+sigma<-matrix(0,nrow=p,ncol=p)
+for (i in 1:p) {
+  for (j in 1:i) {
+    sigma[i,j]<-0.6^abs(i-j)
+    sigma[j,i]<-0.6^abs(i-j)
+  }
+}
+iid<-mvrnorm(n,mu,sigma)
+
+
+# FUN - generate beta
+# p: nrow of beta
+# k: number of non_zero components in beta
+beta_fun<-function(p,k,min=.2,max=.8){
+  index<-sample(c(1:p),k)
+  beta<-matrix(rep(0,p),nrow=p)
+  beta[index]<-round(runif(k,min,max),2)
+  return(beta)
+}
+
+# generate y
+beta<-beta_fun(p,k=30)
+prob<-1/(1+exp(-iid%*%beta))
+y<-rbinom(n=n,size=1,prob=prob)
+
+# FUN - k=1 using the entire dataset
+all_fun<-function(X,y){
+  t1<-proc.time()
+  cvfit<-cv.glmnet(X,y,alpha=1,family="binomial",type.measure="class")
+  pred.cvfit<-predict(cvfit, newx=X, type="class", s="lambda.1se")
+  MR<-sum(abs(y-as.numeric(pred.cvfit)))/length(y)
+  t2<-proc.time()
+  t<-as.numeric((t2-t1)[3])
+  return(c(t,MR))
+}
+```
+
+
+```{r}
+# Fun - split-and-conquer function
+SC_fun<-function(k,X,y,w,ncores){
+  n<-dim(X)[1]
+  p<-dim(X)[2]
+  
+  cl <- makeCluster(ncores)
+  registerDoParallel(cl)
+  beta_dat = foreach(i=1:k,.packages = "glmnet") %dopar%{
+    X_k<-X[(n/k*(i-1)+1):(n/k*i),]
+    y_k<-y[(n/k*(i-1)+1):(n/k*i)]
+    cvfit.update<-cv.glmnet(X_k,y_k,alpha=1,family="binomial",type.measure="class")
+    sub_beta<-coef(cvfit.update,s=cvfit.update$lambda.1se)
+    theta<-X_k%*%as.numeric(sub_beta)[-1]
+    s<-exp(theta)/(1+exp(theta))^2
+    return(c(as.numeric(sub_beta)[-1],s))
+  }
+  
+  beta_dat<-data.frame(sapply(beta_dat, as.numeric))
+  beta_data<-beta_dat[1:p,]
+  Sigma<-beta_dat[(p+1):(p+n/k),]
+  
+  E_index<-as.numeric(apply(beta_data!=0,MARGIN=1,FUN=sum))
+  E<-matrix(rep(0,p*p),nrow=p)
+  E_index<-as.numeric(which(E_index>=w))
+  E[cbind(E_index,E_index)]<-1
+  A<-E[,E_index]
+  
+  beta_dat = foreach(i=1:k,.combine='+') %dopar%{
+    s<-diag(c(Sigma[,i]))
+    x<-X[(n/k*(i-1)+1):(n/k*i),]
+    M1<-t(x[,E_index])%*%s%*%x[,E_index]
+    beta_x<-beta_data[,i][E_index]
+    M2<-M1%*%beta_x
+    cbind(M1,M2)
+  }
+  M1<-beta_dat[,1:dim(A)[2]]
+  M2<-beta_dat[,1+dim(A)[2]]
+  subA<-A
+  subA[E_index,]<-solve(M1)
+  beta_c<-subA%*%M2
+  stopCluster(cl)
+  return(beta_c)
+}
+```
+
+
+
+```{r}
+record1<-c(0,0,0,0)
+  for (i in 1:10) {
+    record1<-record1+all_fun(iid,y)
+  }
+record1/10
+```
+
+
+```{r}
+t<-c(0,0,0)
+for (i in 1:10) {
+  t3<-proc.time()
+  beta_c<-SC_fun(k=2,X=iid,y=y,w=1,ncores=2)
+  pred_y<-1/(1+exp(-iid%*%beta_c))
+  pred_y[which(pred_y>0.5)]<-1
+  pred_y[which(pred_y<0.5)]<-0
+  MR2<-(length(y)-sum(pred_y==y))/length(y)
+  t4<-proc.time()
+  t<-t+as.numeric(t4-t3)[1:3]
+}
+t/10
+```
+
+
+```{r}
+dat2<-data.frame(K=0,ncore=0,"user time"=0,"system time"=0,"elapsed time"=0,"Missclassiification Rate"=0)
+for (k in c(2,4,5,8)) {
+  for (n in c(2,4,5,8)) {
+    t<-c(0,0,0)
+    for (z in 1:10) {
+      t1<-proc.time()
+      beta_c<-SC_fun(k,X=iid,y=y,w=1,ncores=n)
+      pred_y<-1/(1+exp(-iid%*%beta_c))
+      pred_y[which(pred_y>0.5)]<-1
+      pred_y[which(pred_y<0.5)]<-0
+      MR2<-(length(y)-sum(pred_y==y))/length(y)
+      t2<-proc.time()
+      t<-t+as.numeric(t2-t1)[1:3]
+    }
+    t<-t/10
+    dat2<-rbind(dat2,c(k,n,t,MR2))
+  }
+}
+dat2<-dat2[-1,]
+dat2$K<-as.character(dat2$K)
+```
+
+```{r}
+library(ggplot2)
+ggplot(data=dat1,mapping=aes(x=ncore,y=elapsed.time,colour=K))+
+  geom_line()+
+  geom_point(size=1)+
+  scale_x_continuous(breaks=c(2,4,5,8))+
+  scale_y_continuous(limits=c(4,15))+
+  scale_color_manual(values=c("firebrick3","gold3","green4","steelblue3"))+
+  geom_hline(yintercept = 13.98,linetype = "dashed")+
+  annotate("text",x=5,y=13.3,label="all data (K=1)")+
+  theme_classic()+
+  labs(subtitle="n=2000, p=4000")
+
+```
+
+
+```{r}
+dat2<-data.frame(n=0,ncore=0,"elapsed time"=0,"Missclassiification Rate"=0)
+k=4
+for (n in c(800,1000,1600,2000)) {
+  p<-2*n
+  mu<-matrix(rep(0,p),nrow=p)
+  sigma<-diag(1,nrow=p)
+  iid<-mvrnorm(n,mu,sigma)
+  beta<-beta_fun(p,k=30)
+  prob<-1/(1+exp(-iid%*%beta))
+  y<-rbinom(n=n,size=1,prob=prob)
+  for (ncores in c(2,4)) {
+    t<-0
+    for (z in 1:10) {
+      t1<-proc.time()
+      beta_c<-SC_fun(k,X=iid,y=y,w=1,ncores)
+      pred_y<-1/(1+exp(-iid%*%beta_c))
+      pred_y[which(pred_y>0.5)]<-1
+      pred_y[which(pred_y<0.5)]<-0
+      MR2<-(length(y)-sum(pred_y==y))/length(y)
+      t2<-proc.time()
+      t<-t+as.numeric(t2-t1)[3]
+    }
+    t<-t/10
+    dat2<-rbind(dat2,c(n,ncores,t,MR2))
+  }
+  record1<-c(0,0)
+  for (i in 1:10) {
+    record1<-record1+all_fun(iid,y)
+  }
+  dat2<-rbind(dat2,c(n,1,record1/10))
+}
+dat2$ncore<-as.character(dat2$ncore)
+dat2<-dat2[-1,]
+dat2
+```
+
+
+```{r}
+ggplot(data=dat2,mapping=aes(x=n,y=elapsed.time,colour=ncore))+
+  geom_line()+
+  geom_point(size=1)+
+  scale_x_continuous(breaks=c(800,1000,1600,2000))+
+  scale_color_manual(values=c("firebrick3","gold3","green4"))+
+  theme_classic()+
+  labs(subtitle="p=2n, K=4")+
+  ylab("Computing Time")
+
+ggplot(data=dat2,mapping=aes(x=n,y=Missclassiification.Rate,colour=ncore))+
+  geom_line()+
+  geom_point(size=1)+
+  scale_x_continuous(breaks=c(800,1000,1600,2000))+
+  scale_y_continuous(limits=c(0,0.3))+
+  scale_color_manual(values=c("firebrick3","gold3","green4"))+
+  theme_classic()+
+  labs(subtitle="p=2n, K=4")+
+  ylab("Misclassification Rate")
+
+```
+
+
+
+```{r}
+dat3<-data.frame(n=0,ncore=0,"elapsed time"=0,"Missclassiification Rate"=0)
+k=4
+for (n in c(800,1000,1600,2000)) {
+  p<-2*n
+  mu<-matrix(0,nrow=p,ncol=1)
+  sigma<-matrix(0,nrow=p,ncol=p)
+  for (i in 1:p) {
+    for (j in 1:i) {
+      sigma[i,j]<-0.6^abs(i-j)
+      sigma[j,i]<-0.6^abs(i-j)
+    }
+  }
+  iid<-mvrnorm(n,mu,sigma)
+  beta<-beta_fun(p,k=30)
+  prob<-1/(1+exp(-iid%*%beta))
+  y<-rbinom(n=n,size=1,prob=prob)
+  for (ncores in c(2,4)) {
+    t<-0
+    for (z in 1:10) {
+      t1<-proc.time()
+      beta_c<-SC_fun(k,X=iid,y=y,w=1,ncores)
+      pred_y<-1/(1+exp(-iid%*%beta_c))
+      pred_y[which(pred_y>0.5)]<-1
+      pred_y[which(pred_y<0.5)]<-0
+      MR2<-(length(y)-sum(pred_y==y))/length(y)
+      t2<-proc.time()
+      t<-t+as.numeric(t2-t1)[3]
+    }
+    t<-t/10
+    dat3<-rbind(dat3,c(n,ncores,t,MR2))
+  }
+  record1<-c(0,0)
+  for (i in 1:10) {
+    record1<-record1+all_fun(iid,y)
+  }
+  dat3<-rbind(dat3,c(n,1,record1/10))
+}
+dat3$ncore<-as.character(dat3$ncore)
+dat3<-dat3[-1,]
+dat3
+```
+
+```{r}
+ggplot(data=dat3,mapping=aes(x=n,y=elapsed.time,colour=ncore))+
+  geom_line()+
+  geom_point(size=1)+
+  scale_x_continuous(breaks=c(800,1000,1600,2000))+
+  scale_color_manual(values=c("firebrick3","gold3","green4"))+
+  theme_classic()+
+  labs(subtitle="p=2n, K=4")+
+  ylab("Computing Time")
+
+ggplot(data=dat3,mapping=aes(x=n,y=Missclassiification.Rate,colour=ncore))+
+  geom_line()+
+  geom_point(size=1)+
+  scale_x_continuous(breaks=c(800,1000,1600,2000))+
+  scale_y_continuous(limits=c(0,0.3))+
+  scale_color_manual(values=c("firebrick3","gold3","green4"))+
+  theme_classic()+
+  labs(subtitle="p=2n, K=4")+
+  ylab("Misclassification Rate")
+```
+

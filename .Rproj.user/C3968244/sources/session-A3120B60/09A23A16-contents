@@ -1,0 +1,17 @@
+Package: SC
+Type: Package
+Title: Split-and-Conquer Approach
+Version: 0.1.0
+Author: person("Yuxin Liu", email = "yl3564@cornell.edu")
+Description: R package to execute Split-and-Conquer Approach and make simulations.
+License: MIT + file LICENSE
+Encoding: UTF-8
+LazyData: true
+Imports:
+    MASS,
+    glmnet,
+    doParallel,
+    ggplot2
+RoxygenNote: 7.2.3
+Suggests: knitr, rmarkdown
+VignetteBuilder: knitr

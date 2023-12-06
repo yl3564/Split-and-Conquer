@@ -1,0 +1,261 @@
+---
+title: "Simulations"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Put the title of your vignette here}
+  %\VignetteEngine{knitr::rmarkdown}
+  \usepackage[utf8]{inputenc}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r setup}
+library(MASS)
+library(glmnet)
+library(doParallel)
+library(ggplot2)
+library(SC)
+```
+
+```{r}
+# Simulation 1
+
+# Data generation
+## Set number of observations and dimension
+n<-1200
+p<-2000
+
+## Generate X (independent case, sigma^2=1)
+mu<-matrix(0,nrow=p,ncol=1)
+sigma<-diag(1,nrow=p)
+X<-mvrnorm(n,mu,sigma)
+
+## Generate X (nonindependent case)
+mu<-matrix(0,nrow=p,ncol=1)
+sigma<-matrix(0,nrow=p,ncol=p)
+for (i in 1:p) {
+  for (j in 1:i) {
+    sigma[i,j]<-0.6^abs(i-j)
+    sigma[j,i]<-0.6^abs(i-j)
+  }
+}
+X<-mvrnorm(n,mu,sigma)
+
+## Generate y
+beta<-beta_generate(p,k=30,min=.2,max=.8)
+y<-y_generate(beta,X)
+
+## Use all data to fit the logistic model
+t1<-all(X,y)[1]
+MR1<-all(X,y)[2]
+t1 # Computing Time
+MR1 # Misclassification Rate
+
+## Use split-and-conquer approach
+t21<-proc.time()
+beta_c<-SC_fun(k=4,X,y,ncores=2) # beta estimator
+pred_y<-1/(1+exp(-X%*%beta_c)) # predict y using the estimated beta
+pred_y[which(pred_y>0.5)]<-1 # transform to 0/1 class
+pred_y[which(pred_y<0.5)]<-0
+MR2<-(length(y)-sum(pred_y==y))/length(y) # compute misclassification rate
+t22<-proc.time()
+t2<-as.numeric(t22-t21)[3]
+t2 # Computing Time
+MR2 # Misclassification Rate
+```
+
+
+```{r}
+# Simulation 2 - Computing time comparison for different K and the number of cores 
+# under the same dataset: n=2000, p=4000
+## Notes: This produces figure 1 in my report. (Takes time to run the code)
+## Reduce the repetition time z can reduce the execute time.
+
+n<-2000
+p<-4000
+mu<-matrix(0,nrow=p,ncol=1)
+sigma<-diag(1,nrow=p)
+X<-mvrnorm(n,mu,sigma)
+beta<-beta_generate(p,k=30,min=.2,max=.8)
+y<-y_generate(beta,X)
+
+t3<-c(0,0)
+  for (i in 1:10) {
+    t3<-t3+all(X,y)
+  }
+t3<-t3/10
+t3<-t3[1]
+
+dat1<-data.frame(K=0,ncore=0,"user time"=0,"system time"=0,"elapsed time"=0,"Misclassiification Rate"=0)
+for (k in c(2,4,5,8)) {
+  for (n in c(2,4,5,8)) {
+    t<-c(0,0,0)
+    for (z in 1:10) {
+      t1<-proc.time()
+      beta_c<-SC_fun(k,X,y,ncores=n)
+      pred_y<-1/(1+exp(-X%*%beta_c))
+      pred_y[which(pred_y>0.5)]<-1
+      pred_y[which(pred_y<0.5)]<-0
+      MR2<-(length(y)-sum(pred_y==y))/length(y)
+      t2<-proc.time()
+      t<-t+as.numeric(t2-t1)[1:3]
+    }
+    t<-t/10
+    dat1<-rbind(dat1,c(k,n,t,MR2))
+  }
+}
+dat1<-dat1[-1,]
+dat1$K<-as.character(dat1$K)
+
+ggplot(data=dat1,mapping=aes(x=ncore,y=elapsed.time,colour=K))+
+  geom_line()+
+  geom_point(size=1)+
+  scale_x_continuous(breaks=c(2,4,5,8))+
+  scale_y_continuous(limits=c(min(dat1$elapsed.time)-1,max(c(dat1$elapsed.time,t3)+1)))+
+  scale_color_manual(values=c("firebrick3","gold3","green4","steelblue3"))+
+  geom_hline(yintercept = t3,linetype = "dashed")+
+  annotate("text",x=5,y=t3-0.8,label="all data (K=1)")+
+  theme_classic()+
+  labs(subtitle="n=2000, p=4000")+
+  ylab("Computing Time")+
+  xlab("Number of cores")
+
+```
+
+
+```{r}
+# Simulation 3 - Computing time and Misclassification Rate comparison 
+# for different number of observations and cores:
+## X is independent
+## Set p = 2n, k = 4
+
+dat2<-data.frame(n=0,ncore=0,"elapsed time"=0,"Misclassiification Rate"=0)
+k=4
+for (n in c(800,1000,1600,2000)) {
+  p<-2*n
+  mu<-matrix(rep(0,p),nrow=p)
+  sigma<-diag(1,nrow=p)
+  X<-mvrnorm(n,mu,sigma)
+  beta<-beta_generate(p,k=30,min=.2,max=.8)
+  y<-y_generate(beta,X)
+  for (ncores in c(2,4)) {
+    t<-0
+    for (z in 1:10) {
+      t1<-proc.time()
+      beta_c<-SC_fun(k,X,y,ncores)
+      pred_y<-1/(1+exp(-X%*%beta_c))
+      pred_y[which(pred_y>0.5)]<-1
+      pred_y[which(pred_y<0.5)]<-0
+      MR2<-(length(y)-sum(pred_y==y))/length(y)
+      t2<-proc.time()
+      t<-t+as.numeric(t2-t1)[3]
+    }
+    t<-t/10
+    dat2<-rbind(dat2,c(n,ncores,t,MR2))
+  }
+  record1<-c(0,0)
+  for (i in 1:10) {
+    record1<-record1+all(X,y)
+  }
+  dat2<-rbind(dat2,c(n,1,record1/10))
+}
+dat2$ncore<-as.character(dat2$ncore)
+dat2<-dat2[-1,]
+
+ggplot(data=dat2,mapping=aes(x=n,y=elapsed.time,colour=ncore))+
+  geom_line()+
+  geom_point(size=1)+
+  scale_x_continuous(breaks=c(800,1000,1600,2000))+
+  scale_color_manual(values=c("firebrick3","gold3","green4"))+
+  theme_classic()+
+  labs(subtitle="p=2n, K=4")+
+  ylab("Computing Time")+
+  xlab("Number of observations")
+
+ggplot(data=dat2,mapping=aes(x=n,y=Misclassiification.Rate,colour=ncore))+
+  geom_line()+
+  geom_point(size=1)+
+  scale_x_continuous(breaks=c(800,1000,1600,2000))+
+  scale_y_continuous(limits=c(0,0.3))+
+  scale_color_manual(values=c("firebrick3","gold3","green4"))+
+  theme_classic()+
+  labs(subtitle="p=2n, K=4")+
+  ylab("Misclassification Rate")+
+  xlab("Number of observations")
+```
+
+
+```{r}
+# Simulation 4 - Computing time and Misclassification Rate comparison 
+# for different number of observations and cores:
+## X is nonindependent
+## Set p = 2n, k=4
+dat3<-data.frame(n=0,ncore=0,"elapsed time"=0,"Misclassiification Rate"=0)
+k=4
+for (n in c(800,1000,1600,2000)) {
+  p<-2*n
+  mu<-matrix(0,nrow=p,ncol=1)
+  sigma<-matrix(0,nrow=p,ncol=p)
+  for (i in 1:p) {
+    for (j in 1:i) {
+      sigma[i,j]<-0.6^abs(i-j)
+      sigma[j,i]<-0.6^abs(i-j)
+    }
+  }
+  X<-mvrnorm(n,mu,sigma)
+  beta<-beta_generate(p,k=30,min=.2,max=.8)
+  y<-y_generate(beta,X)
+  for (ncores in c(2,4)) {
+    t<-0
+    for (z in 1:10) {
+      t1<-proc.time()
+      beta_c<-SC_fun(k,X,y,ncores)
+      pred_y<-1/(1+exp(-X%*%beta_c))
+      pred_y[which(pred_y>0.5)]<-1
+      pred_y[which(pred_y<0.5)]<-0
+      MR2<-(length(y)-sum(pred_y==y))/length(y)
+      t2<-proc.time()
+      t<-t+as.numeric(t2-t1)[3]
+    }
+    t<-t/10
+    dat3<-rbind(dat3,c(n,ncores,t,MR2))
+  }
+  record1<-c(0,0)
+  for (i in 1:10) {
+    record1<-record1+all(X,y)
+  }
+  dat3<-rbind(dat3,c(n,1,record1/10))
+}
+dat3$ncore<-as.character(dat3$ncore)
+dat3<-dat3[-1,]
+
+ggplot(data=dat3,mapping=aes(x=n,y=elapsed.time,colour=ncore))+
+  geom_line()+
+  geom_point(size=1)+
+  scale_x_continuous(breaks=c(800,1000,1600,2000))+
+  scale_color_manual(values=c("firebrick3","gold3","green4"))+
+  theme_classic()+
+  labs(subtitle="p=2n, K=4")+
+  ylab("Computing Time")+
+  xlab("Number of observations")
+
+ggplot(data=dat3,mapping=aes(x=n,y=Misclassiification.Rate,colour=ncore))+
+  geom_line()+
+  geom_point(size=1)+
+  scale_x_continuous(breaks=c(800,1000,1600,2000))+
+  scale_y_continuous(limits=c(0,0.3))+
+  scale_color_manual(values=c("firebrick3","gold3","green4"))+
+  theme_classic()+
+  labs(subtitle="p=2n, K=4")+
+  ylab("Misclassification Rate")+
+  xlab("Number of observations")
+```
+
+
+
+
