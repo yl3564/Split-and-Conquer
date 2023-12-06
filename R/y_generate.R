@@ -1,9 +1,9 @@
-#' Create a response variable $y$
+#' Create a response variable y
 #'
-#' Create a response variable $y$ follows Bernoulli distribution with success probability
-#' $p(X\beta)$ given $X$ and $\beta$.
+#' Create a response variable y follows Bernoulli distribution with success probability
+#' \eqn{p(X\beta)} given \eqn{X} and \eqn{\beta}.
 #'
-#' @param \beta coefficient vector.
+#' @param \eqn{\beta} coefficient vector.
 #' @param X input matrix, each row is an observation.
 #'
 #' @examples
@@ -12,7 +12,7 @@
 #' mu<-matrix(rep(0,p),nrow=p)
 #' sigma<-diag(1,nrow=p)
 #' X<-mvrnorm(n,mu,sigma)
-#' beta<-beta_fun(p,k=30,min=.2,max=.8)
+#' beta<-beta_generate(p,k=30,min=.2,max=.8)
 #' y_generate(beta,X)
 #'
 #' @export

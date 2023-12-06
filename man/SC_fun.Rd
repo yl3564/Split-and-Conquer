@@ -25,7 +25,7 @@ p<-2*n
 mu<-matrix(rep(0,p),nrow=p)
 sigma<-diag(1,nrow=p)
 X<-mvrnorm(n,mu,sigma)
-beta<-beta_fun(p,k=30,min=.2,max=.8)
+beta<-beta_generate(p,k=30,min=.2,max=.8)
 y<-y_generate(beta,X)
 SC_fun(k=4,X,y,ncores=2)
 
