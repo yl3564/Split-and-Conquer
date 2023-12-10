@@ -1,9 +1,10 @@
 # Split-and-Conquer Approach
 
-This R package realizes the Split-and-Conquer Approach proposed by Xueying Chen and Min-ge Xie ([2014](#ref-SC)) 
+* This R package realizes the Split-and-Conquer Approach proposed by Xueying Chen and Min-ge Xie ([2014](#ref-SC)) 
 on logistic regression model using lasso. It can substantially reduce computing time and computer memory 
-requirements for dataset that is too large to fit into a single computer or too expensive for a computationally intensive data analysis.
-We make several simulations in vignette.Rmd in vignnettes file, comparing computing time and misclassification rate in
+requirements for dataset that is too large to fit into a single computer or too expensive for a computationally intensive data analysis.  
+* This R package contains 4 functions. The *SC_fun()* function outputs estimators using the split-and-conquer approach. The other three functions are designed to generate beta and response variables, facilitating ease of use, simulation, and comparison for users.  
+* We make several simulations in vignette.Rmd in vignnettes file, comparing computing time and misclassification rate in
 different scenarios.
 
 
